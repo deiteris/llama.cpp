@@ -169,6 +169,9 @@ int main(int argc, char ** argv) {
         ctx_http.post("/models/unload",        ex_wrapper(models_routes->post_router_models_unload));
     }
 
+    ctx_http.get ("/api/tags",                 ex_wrapper(routes.get_models)); // ollama specific endpoint. public endpoint (no API key check)
+    ctx_http.get ("/api/version",              ex_wrapper(routes.get_version)); // ollama specific endpoint. public endpoint (no API key check)
+    ctx_http.post("/api/show",                 ex_wrapper(routes.post_api_show)); // ollama specific endpoint. public endpoint (no API key check)
     ctx_http.get ("/health",                   ex_wrapper(routes.get_health)); // public endpoint (no API key check)
     ctx_http.get ("/v1/health",                ex_wrapper(routes.get_health)); // public endpoint (no API key check)
     ctx_http.get ("/metrics",                  ex_wrapper(routes.get_metrics));

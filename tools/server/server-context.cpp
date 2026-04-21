@@ -3663,6 +3663,61 @@ void server_routes::init_routes() {
         return res;
     };
 
+    this->post_api_show = [this](const server_http_req &) {
+        auto res = create_response(true);
+
+        // this endpoint can be accessed during sleeping
+        // the next LOC is to avoid someone accidentally use ctx_server
+        bool ctx_server; // do NOT delete this line
+        GGML_UNUSED(ctx_server);
+
+        std::string tmpl_default = common_chat_templates_source(meta->chat_params.tmpls.get(), "");
+
+        // build capabilities array using Ollama-compatible strings:
+        // "vision" (not "multimodal") is what clients check for image support
+        // "tools" is what clients check for tool/function calling support
+        json capabilities = json::array();
+        capabilities.push_back("completion");
+        if (meta->has_inp_image) {
+            capabilities.push_back("vision");
+        }
+        {
+            auto it = meta->chat_template_caps.find("supports_tool_calls");
+            if (it != meta->chat_template_caps.end() && it->second) {
+                capabilities.push_back("tools");
+            }
+            auto it2 = meta->chat_template_caps.find("supports_parallel_tool_calls");
+            if (it2 != meta->chat_template_caps.end() && it2->second) {
+                capabilities.push_back("parallel_tool_calls");
+            }
+        }
+
+        json data = {
+            {"modelfile", ""},
+            {"parameters", ""},
+            {"template", tmpl_default},
+            {"details", {
+                {"parent_model", ""},
+                {"format", "gguf"},
+                {"family", ""},
+                {"families", {""}},
+                {"parameter_size", ""},
+                {"quantization_level", ""}
+            }},
+            {"model_info", {
+                // "general.architecture" lets clients build the context-length key dynamically
+                // e.g. model_info[general.architecture + ".context_length"]
+                {"general.architecture", "llama"},
+                {"general.basename",     meta->model_name},
+                {"llama.context_length", meta->slot_n_ctx},
+            }},
+            {"capabilities", capabilities}
+        };
+
+        res->ok(data);
+        return res;
+    };
+
     this->post_infill = [this](const server_http_req & req) {
         auto res = create_response();
         // check model compatibility
@@ -3928,6 +3983,23 @@ void server_routes::init_routes() {
         };
 
         res->ok(models);
+        return res;
+    };
+
+    this->get_version = [this](const server_http_req &) {
+        auto res = create_response(true);
+
+        // this endpoint can be accessed during sleeping
+        // the next LOC is to avoid someone accidentally use ctx_server
+        bool ctx_server; // do NOT delete this line
+        GGML_UNUSED(ctx_server);
+
+        const char * version_override = std::getenv("LLAMA_API_VERSION_OVERRIDE");
+        json version = {
+            {"version", version_override ? std::string(version_override) : std::to_string(llama_build_number())}
+        };
+
+        res->ok(version);
         return res;
     };
 

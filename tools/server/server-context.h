@@ -99,6 +99,7 @@ struct server_routes {
 
     // handlers using lambda function, so that they can capture `this` without `std::bind`
     // they won't be called until ctx_http.is_ready is set to true
+    server_http_context::handler_t post_api_show;
     server_http_context::handler_t get_health;
     server_http_context::handler_t get_metrics;
     server_http_context::handler_t get_slots;
@@ -115,6 +116,7 @@ struct server_routes {
     server_http_context::handler_t post_anthropic_count_tokens;
     server_http_context::handler_t post_apply_template;
     server_http_context::handler_t get_models;
+    server_http_context::handler_t get_version;
     server_http_context::handler_t post_tokenize;
     server_http_context::handler_t post_detokenize;
     server_http_context::handler_t post_embeddings;
