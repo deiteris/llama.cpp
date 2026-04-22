@@ -447,8 +447,17 @@ private:
                     std::string square_brackets = std::string(1, c);
                     i++;
                     while (i < length && sub_pattern[i] != ']') {
-                        if (sub_pattern[i] == '\\') {
-                            square_brackets += sub_pattern.substr(i, 2);
+                        if (sub_pattern[i] == '\\' && i + 1 < length) {
+                            char esc = sub_pattern[i + 1];
+                            if (esc == 'd') {
+                                square_brackets += "0-9";
+                            } else if (esc == 'w') {
+                                square_brackets += "a-zA-Z0-9_";
+                            } else if (esc == 's') {
+                                square_brackets += "\\t\\n\\r ";
+                            } else {
+                                square_brackets += sub_pattern.substr(i, 2);
+                            }
                             i += 2;
                         } else {
                             square_brackets += sub_pattern[i];
@@ -529,6 +538,11 @@ private:
                                 i++;
                                 literal += sub_pattern[i];
                                 i++;
+                            } else if (next == 'b' || next == 'B') {
+                                // \b and \B are zero-width word boundary assertions;
+                                // GBNF has no equivalent, so skip and flush the current literal
+                                i += 2;
+                                break;
                             } else {
                                 literal += sub_pattern.substr(i, 2);
                                 i += 2;
