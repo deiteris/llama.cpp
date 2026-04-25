@@ -1,6 +1,8 @@
 #include "json-schema-to-grammar.h"
 #include "common.h"
 
+#include "../src/llama-grammar.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -286,6 +288,20 @@ static std::unordered_map<char, std::string> GRAMMAR_LITERAL_ESCAPES = {
 static std::unordered_set<char> NON_LITERAL_SET = {'|', '.', '(', ')', '[', ']', '{', '}', '*', '+', '?'};
 static std::unordered_set<char> ESCAPED_IN_REGEXPS_BUT_NOT_IN_LITERALS = {'^', '$', '.', '[', ']', '(', ')', '|', '{', '}', '*', '+', '?'};
 
+// Returns the GBNF character-class rule for a regex character class escape (\d, \D, \w, \W, \s, \S).
+// Returns empty string for unrecognized escapes.
+static std::string get_char_class_escape(char esc) {
+    switch (esc) {
+        case 'd': return "[0-9]";
+        case 'D': return "[^0-9]";
+        case 'w': return "[a-zA-Z0-9_]";
+        case 'W': return "[^a-zA-Z0-9_]";
+        case 's': return "[\\t\\n\\r ]";
+        case 'S': return "[^\\t\\n\\r ]";
+        default:  return "";
+    }
+}
+
 static std::string replacePattern(const std::string & input, const std::regex & regex, const std::function<std::string(const std::smatch  &)> & replacement) {
     std::smatch match;
     std::string result;
@@ -351,7 +367,7 @@ private:
     }
 
     std::string _visit_pattern(const std::string & pattern, const std::string & name) {
-        if (!(pattern.front() == '^' && pattern.back() == '$')) {
+        if (pattern.size() < 2 || !(pattern.front() == '^' && pattern.back() == '$')) {
             _errors.push_back("Pattern must start with '^' and end with '$'");
             return "";
         }
@@ -454,12 +470,13 @@ private:
                     while (i < length && sub_pattern[i] != ']') {
                         if (sub_pattern[i] == '\\' && i + 1 < length) {
                             char esc = sub_pattern[i + 1];
-                            if (esc == 'd') {
-                                square_brackets += "0-9";
-                            } else if (esc == 'w') {
-                                square_brackets += "a-zA-Z0-9_";
-                            } else if (esc == 's') {
-                                square_brackets += "\\t\\n\\r ";
+                            auto cls = get_char_class_escape(esc);
+                            if (!cls.empty() && islower(static_cast<unsigned char>(esc))) {
+                                // Append the inner range content, stripping the surrounding [ ]
+                                square_brackets += cls.substr(1, cls.size() - 2);
+                            } else if (esc == '-' || esc == '^' || esc == '/') {
+                                // Regex-only escapes: strip the backslash, emit the bare character
+                                square_brackets += esc;
                             } else {
                                 square_brackets += sub_pattern.substr(i, 2);
                             }
@@ -548,9 +565,22 @@ private:
                                 // GBNF has no equivalent, so skip and flush the current literal
                                 i += 2;
                                 break;
-                            } else {
-                                literal += sub_pattern.substr(i, 2);
+                            } else if (!get_char_class_escape(next).empty()) {
+                                // Character class escape (\d, \w, \s etc.): flush accumulated literal,
+                                // then add a named character-class rule and continue the loop.
+                                if (!literal.empty()) {
+                                    seq.emplace_back(literal, true);
+                                    literal.clear();
+                                }
+                                seq.emplace_back(_add_rule(std::string("char-class-esc-") + next, get_char_class_escape(next)), false);
                                 i += 2;
+                            } else {
+                                // Unknown escape sequence: not a regex metacharacter stripped by
+                                // ESCAPED_IN_REGEXPS_BUT_NOT_IN_LITERALS, not a GBNF-supported escape.
+                                // Passing it through would produce invalid GBNF; signal an error so
+                                // the call site can fall back to an unconstrained string rule.
+                                _errors.push_back(std::string("Unsupported pattern escape: \\") + next);
+                                return std::make_pair("", false);
                             }
                         } else if (sub_pattern[i] == '"') {
                             literal += "\\\"";
@@ -978,7 +1008,17 @@ public:
             return _add_rule(rule_name, "\"[\" space " + build_repetition(item_rule_name, min_items, max_items, "\",\" space") + " \"]\" space");
         }
         if ((schema_type.is_null() || schema_type == "string") && schema.contains("pattern")) {
-            return _visit_pattern(schema["pattern"], rule_name);
+            auto errors_before = _errors.size();
+            auto result = _visit_pattern(schema["pattern"], rule_name);
+            if (_errors.size() > errors_before) {
+                // Pattern contained unsupported syntax; collect reasons, then discard errors and fall back.
+                std::string reasons = string_join(
+                    std::vector<std::string>(_errors.begin() + errors_before, _errors.end()), "; ");
+                _errors.resize(errors_before);
+                _warnings.push_back("Could not convert pattern to grammar (" + reasons + "), falling back to unconstrained string: " + schema["pattern"].get<std::string>());
+                return _add_primitive(rule_name == "root" ? "root" : "string", PRIMITIVE_RULES.at("string"));
+            }
+            return result;
         }
         if ((schema_type.is_null() || schema_type == "string") && std::regex_match(schema_format, std::regex("^uuid[1-5]?$"))) {
             return _add_primitive(rule_name == "root" ? "root" : schema_format, PRIMITIVE_RULES.at("uuid"));
