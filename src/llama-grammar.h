@@ -2,6 +2,8 @@
 
 #include "llama.h"
 
+#define MAX_REPETITION_THRESHOLD 2000
+
 #include <map>
 #include <regex>
 #include <string>

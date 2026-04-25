@@ -14,7 +14,12 @@
 
 using json = nlohmann::ordered_json;
 
+// GBNF expands {N,M} into N–M chained NFA states; the parser rejects values above MAX_REPETITION_THRESHOLD.
+// When max exceeds the threshold, drop the upper bound (grammar becomes more permissive but won't crash).
 static std::string build_repetition(const std::string & item_rule, int min_items, int max_items, const std::string & separator_rule = "") {
+    if (max_items != std::numeric_limits<int>::max() && max_items > MAX_REPETITION_THRESHOLD) {
+        max_items = std::numeric_limits<int>::max();
+    }
     auto has_max = max_items != std::numeric_limits<int>::max();
 
     if (max_items == 0) {
